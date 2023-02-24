@@ -1,6 +1,6 @@
 ---
 title: "Burrowing Bees"
-author: "Your Name Here"
+author: "Nate Bender"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 html_document:
     toc: true
@@ -14,6 +14,7 @@ html_document:
 
 ```{r setup, include=FALSE}
 library(tidyverse)
+library(gridExtra)
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
@@ -38,6 +39,7 @@ res <- tibble(pattern=c("4,0,0,0","3,1,0,0","2,2,0,0","2,1,1,0","1,1,1,1"),
 
 knitr::kable(res,digits=3,colnames=c("Pattern","Count","Portion"))
 
+
 ```
 
 The biologist was interested in whether the bees appear to choose holes independently of 
@@ -56,20 +58,246 @@ In order to do this, you will need to write code that simulates a
 certain number of trials (which can be user determined).
 
 The following steps are a guideline; there are many ways to solve the problem:
+  
+**1.	Write a function that takes a vector of hole choices from the bees and maps it onto our pattern.** 
+    For instance, the vector c(3,3,3,3) could indicate that all bees chose hole 3. 
+    The vector c(4,1,2,4) could mean that bees 1 and 4 chose hole 4, bee 2 chose hole 1, and bee 3 chose hole 2. You would need to map these to “4,0,0,0” and “2,1,1,0” respectively. 
+  
+```{r mapping_function}
 
-1.	Set up a data frame to hold the results of your analysis. 
-1.	Write a function that takes a vector of hole choices from the 
-    bees and maps it onto our pattern. For instance, the vector c(3,3,3,3) 
-    could indicate that all bees chose hole 3. 
-    The vector c(4,1,2,4) could mean that bees 1 and 4 chose hole 4, bee 2 chose hole 1, and bee 3 chose hole 2. 
-    You would need to map these to “4,0,0,0” and “2,1,1,0” respectively. 
-1.	Set up a way to do the actual selection of holes. This is basically the "shuffling" 
-from permutation testing. Check out `sample`.
-1.	Record those values in your data frame and use those to estimate the proportions. 
+get_pattern <- function(x){
+  x_tbl <- table(x)
+  x_tbl_max <- max(x_tbl)
+  x_tbl_len <- length(x_tbl)
+  pattern <- "poops"
+  if(x_tbl_max == 4){
+    pattern <- "4,0,0,0"
+  } else if(x_tbl_max == 3){
+    pattern <- "3,1,0,0"
+  } else if(x_tbl_max == 1){
+    pattern <- "1,1,1,1"
+  } else if(x_tbl_max == 2){
+    if(x_tbl_len == 2){
+      pattern <- "2,2,0,0"
+    } else if(x_tbl_len == 3){
+      pattern <- "2,1,1,0"
+    } else{
+      pattern <- "oops"
+    }
+    
+  } else{
+    pattern <- "oops"
+  }
+  return(pattern)
+}
 
+# test the function
+test <- sample(4, replace=T)
+get_pattern(test)
+
+```
+    
+### **2.	Set up a way to do the actual selection of holes.** This is basically the "shuffling" from permutation testing. Check out `sample`.
+
+*Functions for calculations*
+    
+```{r}
+
+# under independence assumption, each pattern should have an expected proportion of 0.2
+get.prop.diff <- function(x, specific_pattern){
+  var.obs.score <- x$portion[x$pattern==specific_pattern]
+  var.exp.score <- 0.2
+  return(var.obs.score - var.exp.score)
+}
+
+```
+
+
+```{r}
+
+# assign counts based on random sampling
+assign_count <- function(x, sim_pattern) {
+  if (sim_pattern == "4,0,0,0") {
+    x$count[x$pattern == "4,0,0,0"] <- x$count[x$pattern == "4,0,0,0"] + 1
+  } else if (sim_pattern == "3,1,0,0") {
+    x$count[x$pattern == "3,1,0,0"] <- x$count[x$pattern == "3,1,0,0"] + 1
+  } else if (sim_pattern == "2,2,0,0") {
+    x$count[x$pattern == "2,2,0,0"] <- x$count[x$pattern == "2,2,0,0"] + 1
+  } else if (sim_pattern == "2,1,1,0") {
+    x$count[x$pattern == "2,1,1,0"] <- x$count[x$pattern == "2,1,1,0"] + 1
+  } else if (sim_pattern == "1,1,1,1") {
+    x$count[x$pattern == "1,1,1,1"] <- x$count[x$pattern == "1,1,1,1"] + 1
+  }
+  return(x)
+}
+```
+
+
+### **3.	Set up a data frame to hold the results of your analysis.** 
+### **4.	Record those values in your data frame and use those to estimate the proportions.** 
 Do steps 1-4 many times  and calculate the proportions of each outcome. Then compare that to the experimental results. 
+  
+```{r}
 
-Do the results of the experiment seem to the the result of chance? 
+overall_simulation <- function(x, specific_pattern, n.sim){
+  n.patterns <- 37
+
+  actual.value <- get.prop.diff(res, specific_pattern)
+
+  results <- tibble(statistic = c(actual.value, rep(NA, n.sim)))
+
+  for (i in 2:nrow(results)) {
+    
+    # reset new.d for each new experiment
+    new.d <- res %>% 
+      select(pattern, count, portion) %>%
+      mutate(count = 0, portion = 0)
+  
+    # simulate 1 experiment made up of 37 trials of getting patterns
+    for (j in 1:n.patterns) {
+      sim_choices <- sample(4, replace = TRUE)  # simulate bees' choices
+      sim_pattern <- get_pattern(sim_choices)
+      new.d <- assign_count(new.d, sim_pattern)
+      new.d$portion <- new.d$count / sum(new.d$count)
+    }
+    
+    # append to results
+    results$statistic[i] <- get.prop.diff(new.d, specific_pattern)
+  }
+
+  pval = mean(abs(results$statistic) >= actual.value)
+  return(list(results = results, pval = pval, actual.value = actual.value))
+}
+
+```
+  
+## **Do the results of the experiment seem to be the result of chance?** 
+    
+```{r}
+pattern_4000 <- "4,0,0,0"
+pattern_3100 <- "3,1,0,0"
+pattern_2200 <- "2,2,0,0"
+pattern_2110 <- "2,1,1,0"
+pattern_1111 <- "1,1,1,1"
+
+n.sim <- 1000
+
+results_2200 <- overall_simulation(res, pattern_2200, n.sim)
+p1 <- ggplot(results_2200$results,
+             aes(x=statistic)) +
+  geom_density() +
+  geom_vline(xintercept=results_2200$actual.value,color="red") +
+  theme_minimal() +
+  ggtitle(paste("2200 Plot", "\n", "p-value =", round(results_2200$pval, 4))) +
+  labs(x="Difference in Proportions",
+       y="")
+  
+results_2110 <- overall_simulation(res, pattern_2110, n.sim)
+p2 <- ggplot(results_2110$results,
+             aes(x=statistic)) +
+  geom_density() +
+  geom_vline(xintercept=results_2110$actual.value,color="red") +
+  theme_minimal() +
+  ggtitle(paste("2110 Plot", "\n", "p-value =", round(results_2110$pval, 4))) +
+  labs(x="Difference in Proportions",
+       y="")
+  
+results_4000 <- overall_simulation(res, pattern_4000, n.sim)
+p3 <- ggplot(results_4000$results,
+             aes(x=statistic)) +
+  geom_density() +
+  geom_vline(xintercept=results_4000$actual.value,color="red") +
+  theme_minimal() +
+  ggtitle(paste("4000 Plot", "\n", "p-value =", round(results_4000$pval, 4))) +
+  labs(x="Difference in Proportions",
+       y="")
+  
+results_3100 <- overall_simulation(res, pattern_3100, n.sim)
+p4 <- ggplot(results_3100$results,
+             aes(x=statistic)) +
+  geom_density() +
+  geom_vline(xintercept=results_3100$actual.value,color="red") +
+  theme_minimal() +
+  ggtitle(paste("3100 Plot", "\n", "p-value =", round(results_3100$pval, 4))) +
+  labs(x="Difference in Proportions",
+       y="")
+
+results_1111 <- overall_simulation(res, pattern_1111, n.sim)
+p5 <- ggplot(results_1111$results,
+             aes(x=statistic)) +
+  geom_density() +
+  geom_vline(xintercept=results_1111$actual.value,color="red") +
+  theme_minimal() +
+  ggtitle(paste("1111 Plot", "\n", "p-value =", round(results_1111$pval, 4))) +
+  labs(x="Difference in Proportions",
+       y="")
+  
+
+# Overlay plots
+grid.arrange(p1, p2, p3, p4, p5, ncol = 2)
+ 
+```
+      
+### Analysis & Interpretation
+Yes, the results of the experiment are in line with what we'd expect from chance. I set up a test statistic for permutations that assumed all five patterns have an equal chance of being chosen by the bees in each of the 37 trials of the experiement. That is, each pattern has a 0.2 probability of being chosen under the assumption that the bees choose the holes independently of each other. 
+
+My test statistic then is the difference in proportion between the actual proportion found in Dr. Kukuk's experiment and 0.2. For instance, the original experiment found a proportion of 0.459 for the "2,1,1,0" pattern. My test statistic for that pattern would then be 0.459-0.2, or 0.259. 
+
+I then simulated the experiment 1,000 times for each pattern, forcing the "bees" to pick patterns randomly. At the end of each simulation, I calculated the difference in the proportion for that pattern compared to 0.2. I gathered all of these differences into a dataframe and plotted the results, calculating an overall p-value for each pattern by seeing how many simulated differences were equal to or more extreme than the original difference found. 
+
+I find four p-values of 1 and one of 0.94, indicating no evidence to reject the null hypothesis that the bees are choosing patterns randomly. 
+   
+```{r test, echo=F}
+
+# Pull things out of function to test on a single pattern
+
+# test_pattern <- pattern_2110
+# 
+# n.sim <- 1000
+# n.patterns <- 37
+# 
+# actual.value <- get.prop.diff(res, test_pattern)
+# 
+# results <- tibble(statistic = c(actual.value, rep(NA, n.sim)))
+# 
+# for (i in 2:nrow(results)) {
+#   
+#   # reset new.d for each new experiment
+#   new.d <- res %>% 
+#     select(pattern, count, portion) %>%
+#     mutate(count = 0, portion = 0)
+# 
+#   # simulate 1 experiment, made up of 37 trials of getting patterns
+#   for (j in 1:n.patterns) {
+#     sim_choices <- sample(4, replace = TRUE)  # simulate bees' choices
+#     sim_pattern <- get_pattern(sim_choices)
+#     new.d <- assign_count(new.d, sim_pattern)
+#     new.d$portion <- new.d$count / sum(new.d$count)
+#   }
+#   
+#   # append to results
+#   results$statistic[i] <- get.prop.diff(new.d, test_pattern)
+# }
+# 
+# pval = mean(abs(results$statistic) >= actual.value)
+# 
+# ggplot(results,
+#        aes(x=statistic)) +
+#   geom_density() +
+#   geom_vline(xintercept=actual.value,color="red") +
+#   theme_minimal() +
+#   ggtitle(paste("Test Plot", "\n", "p-value =", round(pval, 4))) +
+#   labs(x="Difference in Proportions",
+#        y="")
+
+
+
+```
+
+
+
+
+
 
 
 
