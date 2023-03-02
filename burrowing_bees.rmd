@@ -104,16 +104,16 @@ get_pattern(test)
 ```{r}
 
 # under independence assumption, each pattern should have an expected proportion of 0.2
-get.prop.diff <- function(x, specific_pattern){
+get.prop.diff <- function(x, expected_prob, specific_pattern){
   var.obs.score <- x$portion[x$pattern==specific_pattern]
-  var.exp.score <- 0.2
+  var.exp.score <- expected_prob$prop[expected_prob$pattern==specific_pattern]
   return(var.obs.score - var.exp.score)
 }
 
 ```
 
 
-```{r}
+```{r, cache=T}
 
 # assign counts based on random sampling
 assign_count <- function(x, sim_pattern) {
@@ -130,6 +130,21 @@ assign_count <- function(x, sim_pattern) {
   }
   return(x)
 }
+
+exp_prob <- tibble(
+  pattern = c("4,0,0,0", "3,1,0,0", "2,2,0,0", "2,1,1,0", "1,1,1,1"),
+  count = 0
+)
+
+for (i in 1:10000){
+  sim_choices <- sample(4, replace = TRUE)  # simulate bees' choices
+  exp_prob <- assign_count(exp_prob,
+                           get_pattern(sim_choices))
+}
+
+exp_prob <- exp_prob %>% 
+  mutate(prop = count/sum(count))
+
 ```
 
 
@@ -140,9 +155,9 @@ Do steps 1-4 many times  and calculate the proportions of each outcome. Then com
 ```{r}
 
 overall_simulation <- function(x, specific_pattern, n.sim){
-  n.patterns <- 37
+  n.trials <- 37
 
-  actual.value <- get.prop.diff(res, specific_pattern)
+  actual.value <- get.prop.diff(res, exp_prob, specific_pattern)
 
   results <- tibble(statistic = c(actual.value, rep(NA, n.sim)))
 
@@ -154,7 +169,7 @@ overall_simulation <- function(x, specific_pattern, n.sim){
       mutate(count = 0, portion = 0)
   
     # simulate 1 experiment made up of 37 trials of getting patterns
-    for (j in 1:n.patterns) {
+    for (j in 1:n.trials) {
       sim_choices <- sample(4, replace = TRUE)  # simulate bees' choices
       sim_pattern <- get_pattern(sim_choices)
       new.d <- assign_count(new.d, sim_pattern)
@@ -162,7 +177,7 @@ overall_simulation <- function(x, specific_pattern, n.sim){
     }
     
     # append to results
-    results$statistic[i] <- get.prop.diff(new.d, specific_pattern)
+    results$statistic[i] <- get.prop.diff(new.d, exp_prob, specific_pattern)
   }
 
   pval = mean(abs(results$statistic) >= actual.value)
@@ -173,7 +188,7 @@ overall_simulation <- function(x, specific_pattern, n.sim){
   
 ## **Do the results of the experiment seem to be the result of chance?** 
     
-```{r}
+```{r, cache=T}
 pattern_4000 <- "4,0,0,0"
 pattern_3100 <- "3,1,0,0"
 pattern_2200 <- "2,2,0,0"
@@ -239,60 +254,14 @@ grid.arrange(p1, p2, p3, p4, p5, ncol = 2)
 ```
       
 ### Analysis & Interpretation
-Yes, the results of the experiment are in line with what we'd expect from chance. I set up a test statistic for permutations that assumed all five patterns have an equal chance of being chosen by the bees in each of the 37 trials of the experiement. That is, each pattern has a 0.2 probability of being chosen under the assumption that the bees choose the holes independently of each other. 
+  
+No, the results of the experiment are not wholly in line with what we'd expect from chance. I tested this by first calculating the expected probabilities of each pattern under the assumption of independence. I used these expected probabilities to calculate a test statistic of the observed probability minus the expected. For instance, the original experiment found a proportion of 0.459 for the "2,1,1,0" pattern, while the expected probability for that pattern is 0.56. My test statistic for that pattern would then be 0.56-0.459, or 0.101. 
 
-My test statistic then is the difference in proportion between the actual proportion found in Dr. Kukuk's experiment and 0.2. For instance, the original experiment found a proportion of 0.459 for the "2,1,1,0" pattern. My test statistic for that pattern would then be 0.459-0.2, or 0.259. 
+I set up a permutation test to simulate Dr. Kukuk's experiment 1000 times. At the end of each simulation, I calculated the difference in the proportion for each given pattern compared to its observed probability. I gathered all of these differences into a dataframe and plotted the results, calculating an overall p-value for each pattern by seeing how many simulated differences were equal to or more extreme than the original difference found. 
 
-I then simulated the experiment 1,000 times for each pattern, forcing the "bees" to pick patterns randomly. At the end of each simulation, I calculated the difference in the proportion for that pattern compared to 0.2. I gathered all of these differences into a dataframe and plotted the results, calculating an overall p-value for each pattern by seeing how many simulated differences were equal to or more extreme than the original difference found. 
+I find three p-values of 1 — for the "2200", "2110" and "3100" patterns — indicating we have no evidence to expect that the observed probabilities for these patterns are anything but due to chance. 
 
-I find four p-values of 1 and one of 0.94, indicating no evidence to reject the null hypothesis that the bees are choosing patterns randomly. 
-   
-```{r test, echo=F}
-
-# Pull things out of function to test on a single pattern
-
-# test_pattern <- pattern_2110
-# 
-# n.sim <- 1000
-# n.patterns <- 37
-# 
-# actual.value <- get.prop.diff(res, test_pattern)
-# 
-# results <- tibble(statistic = c(actual.value, rep(NA, n.sim)))
-# 
-# for (i in 2:nrow(results)) {
-#   
-#   # reset new.d for each new experiment
-#   new.d <- res %>% 
-#     select(pattern, count, portion) %>%
-#     mutate(count = 0, portion = 0)
-# 
-#   # simulate 1 experiment, made up of 37 trials of getting patterns
-#   for (j in 1:n.patterns) {
-#     sim_choices <- sample(4, replace = TRUE)  # simulate bees' choices
-#     sim_pattern <- get_pattern(sim_choices)
-#     new.d <- assign_count(new.d, sim_pattern)
-#     new.d$portion <- new.d$count / sum(new.d$count)
-#   }
-#   
-#   # append to results
-#   results$statistic[i] <- get.prop.diff(new.d, test_pattern)
-# }
-# 
-# pval = mean(abs(results$statistic) >= actual.value)
-# 
-# ggplot(results,
-#        aes(x=statistic)) +
-#   geom_density() +
-#   geom_vline(xintercept=actual.value,color="red") +
-#   theme_minimal() +
-#   ggtitle(paste("Test Plot", "\n", "p-value =", round(pval, 4))) +
-#   labs(x="Difference in Proportions",
-#        y="")
-
-
-
-```
+However, I find that the observed probability for the "4000" is extremely unlikely to be due to chance; p-value is 0.003. The "1111" pattern's observed probability is also highly unlikely to be due to chance; p-value 0.05. These two pattern support the alternative hypothesis that the bees tend to either choose holes in which there already is a bee or tend to avoid holes in which there already.
 
 
 
